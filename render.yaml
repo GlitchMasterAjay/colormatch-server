@@ -2,6 +2,5 @@ services:
   - type: web
     name: colormatch-server-1
     env: node
-    rootDirectory: server
-    buildCommand: npm install
-    startCommand: node index.js
+    buildCommand: npm run install:all
+    startCommand: npm run start:server
