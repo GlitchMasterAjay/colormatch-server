@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: colormatch-server-1
+    env: node
+    buildCommand: npm run install:all
+    startCommand: npm run start:server
