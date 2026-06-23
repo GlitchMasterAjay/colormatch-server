@@ -144,40 +144,47 @@ io.on('connection', (socket) => {
     const roomCode = playerRooms[socket.id];
     const room = rooms[roomCode];
     if (!room || room.gameState !== 'playing') return;
+    
+    // Check if it's this player's turn
+    const currentPlayerId = room.playerOrder[room.currentPlayerIndex];
+    if (socket.id !== currentPlayerId) {
+      return emitError(socket, 'It\'s not your turn!');
+    }
+
     const hand = room.hands[socket.id];
     if (!hand) return;
-    const card = hand.find(c => c.id === cardId);
-    if (!card) return emitError(socket, 'Invalid card selection.');
+    const cardIndex = hand.findIndex(c => c.id === cardId);
+    if (cardIndex === -1) return emitError(socket, 'Invalid card selection.');
 
-    room.selectedCards[socket.id] = cardId;
-    socket.emit('player:state', getPlayerPrivateState(room, socket.id));
-    io.to(roomCode).emit('room:state', getPublicRoomState(room));
-
-    const connectedPlayers = room.players.filter(p => p.connected);
-    const allSubmitted = connectedPlayers.every(p => room.selectedCards[p.id]);
-
-    if (allSubmitted) {
-      room.hands = passCards(room.hands, room.playerOrder, room.selectedCards);
-      room.selectedCards = {};
+    // Remove the card from current player
+    const [selectedCard] = hand.splice(cardIndex, 1);
+    
+    // Move to next player in circle
+    const nextPlayerIndex = (room.currentPlayerIndex + 1) % room.playerOrder.length;
+    const nextPlayerId = room.playerOrder[nextPlayerIndex];
+    
+    // Give card to next player
+    room.hands[nextPlayerId].push(selectedCard);
+    
+    // Check if next player won
+    const result = checkWinner(room.hands);
+    if (result) {
+      room.gameState = 'finished';
+      const winner = room.players.find(p => p.id === result.winnerId);
+      room.winner = {
+        playerId: result.winnerId,
+        playerName: winner ? winner.name : 'Unknown',
+        color: result.color
+      };
+      const allHands = {};
+      room.players.forEach(p => { allHands[p.id] = room.hands[p.id] || []; });
+      io.to(roomCode).emit('game:over', { winner: room.winner, allHands });
+      emitRoomState(roomCode);
+    } else {
+      // Move to next player's turn
+      room.currentPlayerIndex = nextPlayerIndex;
       room.round++;
-
-      const result = checkWinner(room.hands);
-      if (result) {
-        room.gameState = 'finished';
-        const winner = room.players.find(p => p.id === result.winnerId);
-        room.winner = {
-          playerId: result.winnerId,
-          playerName: winner ? winner.name : 'Unknown',
-          color: result.color
-        };
-        const allHands = {};
-        room.players.forEach(p => { allHands[p.id] = room.hands[p.id] || []; });
-        io.to(roomCode).emit('game:over', { winner: room.winner, allHands });
-        emitRoomState(roomCode);
-      } else {
-        io.to(roomCode).emit('round:complete', { round: room.round });
-        emitRoomState(roomCode);
-      }
+      emitRoomState(roomCode);
     }
   });
 
@@ -190,6 +197,7 @@ io.on('connection', (socket) => {
     room.gameState = 'lobby';
     room.hands = {};
     room.playerOrder = [];
+    room.currentPlayerIndex = 0;
     room.selectedCards = {};
     room.round = 0;
     room.winner = null;

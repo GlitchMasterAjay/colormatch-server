@@ -86,7 +86,8 @@ function createRoom(hostId, hostName) {
     gameState: 'lobby', // lobby | playing | finished
     hands: {},
     playerOrder: [],
-    selectedCards: {}, // playerId -> cardId
+    currentPlayerIndex: 0, // whose turn it is
+    selectedCards: {}, // playerId -> cardId they selected
     round: 0,
     winner: null,
     deck: []
@@ -113,6 +114,7 @@ function startGame(room) {
   room.gameState = 'playing';
   room.hands = hands;
   room.playerOrder = playerOrder;
+  room.currentPlayerIndex = 0; // First player starts
   room.selectedCards = {};
   room.round = 1;
   room.winner = null;
@@ -126,12 +128,14 @@ function getPublicRoomState(room) {
     id: room.id,
     gameState: room.gameState,
     hostId: room.hostId,
+    currentPlayerTurn: room.playerOrder[room.currentPlayerIndex] || null,
     players: room.players.map(p => ({
       id: p.id,
       name: p.name,
       ready: p.ready,
       connected: p.connected,
-      cardCount: room.hands[p.id] ? room.hands[p.id].length : 0
+      cardCount: room.hands[p.id] ? room.hands[p.id].length : 0,
+      isCurrentTurn: p.id === room.playerOrder[room.currentPlayerIndex]
     })),
     playerOrder: room.playerOrder,
     round: room.round,
