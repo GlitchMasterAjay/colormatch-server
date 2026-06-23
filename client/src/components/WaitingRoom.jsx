@@ -6,7 +6,11 @@ export default function WaitingRoom({ roomState, myId, isHost, onReady, onStart,
   const [copied, setCopied] = useState(false);
 
   const players = roomState?.players || [];
-  const allReady = players.length === SEATS && players.every(p => p.connected && p.ready);
+// Change this line:
+// const allReady = players.length === SEATS && players.every(p => p.connected && p.ready);
+
+// To this (Excludes the host from the ready check):
+const allReady = players.length === SEATS && players.every(p => p.id === roomState.hostId || (p.connected && p.ready));
   const me = players.find(p => p.id === myId);
 
   const copyCode = () => {
