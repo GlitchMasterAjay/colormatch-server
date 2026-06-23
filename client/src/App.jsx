@@ -135,8 +135,11 @@ export default function App() {
     window.location.reload();
   }, []);
 
-  const isHost = roomState?.players?.find(p => p.id === myId)?.id === roomState?.hostId
-    || myId === roomState?.hostId;
+ // REPLACE THIS OLD LINE:
+// const isHost = roomState?.players?.find(p => p.id === myId)?.id === roomState?.hostId || myId === roomState?.hostId;
+
+// WITH THIS BULLETPROOF CHECK:
+const isHost = roomState && myId && String(roomState.hostId) === String(myId);
 
   if (view === VIEW.LOBBY) {
     return <Lobby onCreateRoom={handleCreateRoom} onJoinRoom={handleJoinRoom} error={error} connected={connected} />;
