@@ -116,7 +116,6 @@ function startGame(room) {
   room.playerOrder = playerOrder;
   room.currentPlayerIndex = 0; // First player starts
   room.selectedCards = {};
-  room.round = 1;
   room.winner = null;
   room.deck = deck;
 

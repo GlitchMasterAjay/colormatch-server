@@ -183,7 +183,6 @@ io.on('connection', (socket) => {
     } else {
       // Move to next player's turn
       room.currentPlayerIndex = nextPlayerIndex;
-      room.round++;
       emitRoomState(roomCode);
     }
   });
@@ -199,7 +198,6 @@ io.on('connection', (socket) => {
     room.playerOrder = [];
     room.currentPlayerIndex = 0;
     room.selectedCards = {};
-    room.round = 0;
     room.winner = null;
     room.deck = [];
     room.players.forEach(p => { p.ready = false; });
@@ -215,37 +213,46 @@ io.on('connection', (socket) => {
     const room = rooms[roomCode];
     if (!room) return;
 
-    const player = room.players.find(p => p.id === socket.id);
-    if (player) {
-      player.connected = false;
-      console.log(`Player ${player.name} disconnected from room ${roomCode}`);
-    }
+    const playerIndex = room.players.findIndex(p => p.id === socket.id);
+    if (playerIndex === -1) return;
 
+    const disconnectedPlayer = room.players[playerIndex];
+    console.log(`Player ${disconnectedPlayer.name} left room ${roomCode}`);
+
+    // Remove player completely from room
+    room.players.splice(playerIndex, 1);
+
+    // If player was in game, end game
     if (room.gameState === 'playing') {
-      io.to(roomCode).emit('player:disconnected', {
-        playerName: player ? player.name : 'A player'
+      room.gameState = 'lobby';
+      room.hands = {};
+      room.playerOrder = [];
+      room.currentPlayerIndex = 0;
+      room.selectedCards = {};
+      room.winner = null;
+      room.deck = [];
+      room.players.forEach(p => { p.ready = false; });
+      io.to(roomCode).emit('player:left', {
+        playerName: disconnectedPlayer.name,
+        message: `${disconnectedPlayer.name} left the game. Returning to lobby...`
       });
     }
 
-    if (room.gameState === 'lobby' && room.hostId === socket.id) {
-      const nextConnected = room.players.find(p => p.connected && p.id !== socket.id);
-      if (nextConnected) {
-        room.hostId = nextConnected.id;
-        io.to(roomCode).emit('host:changed', { newHostId: nextConnected.id });
-      }
+    // If host left, reassign host from remaining players
+    if (room.hostId === socket.id && room.players.length > 0) {
+      room.hostId = room.players[0].id;
+      console.log(`Host reassigned to ${room.players[0].name}`);
     }
 
-    const anyConnected = room.players.some(p => p.connected);
-    if (!anyConnected) {
-      setTimeout(() => {
-        if (rooms[roomCode] && !rooms[roomCode].players.some(p => p.connected)) {
-          delete rooms[roomCode];
-          console.log(`Room ${roomCode} cleaned up.`);
-        }
-      }, 30000);
+    // If room is empty, delete it
+    if (room.players.length === 0) {
+      delete rooms[roomCode];
+      console.log(`Room ${roomCode} deleted (no players left).`);
+    } else {
+      // Update all remaining players
+      emitRoomState(roomCode);
     }
 
-    emitRoomState(roomCode);
     delete playerRooms[socket.id];
   });
 });

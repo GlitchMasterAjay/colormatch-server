@@ -25,6 +25,8 @@ export default function GameBoard({
   const round = roomState?.round || 1;
   const submittedPlayers = roomState?.submittedPlayers || [];
   const isFinished = roomState?.gameState === 'finished';
+  const isMyTurn = roomState?.currentPlayerTurn === myId;
+  const currentPlayer = players.find(p => p.id === roomState?.currentPlayerTurn);
 
   // Find other players relative to me
   const myIndex = roomState?.playerOrder?.indexOf(myId) ?? -1;
@@ -166,6 +168,7 @@ export default function GameBoard({
                   player={orderedOthers[1]}
                   submitted={submittedPlayers.includes(orderedOthers[1]?.id)}
                   position="top"
+                  isCurrentTurn={orderedOthers[1]?.isCurrentTurn}
                 />
               )}
             </div>
@@ -179,6 +182,7 @@ export default function GameBoard({
                     player={orderedOthers[2]}
                     submitted={submittedPlayers.includes(orderedOthers[2]?.id)}
                     position="left"
+                    isCurrentTurn={orderedOthers[2]?.isCurrentTurn}
                   />
                 )}
               </div>
@@ -204,6 +208,7 @@ export default function GameBoard({
                     player={orderedOthers[0]}
                     submitted={submittedPlayers.includes(orderedOthers[0]?.id)}
                     position="right"
+                    isCurrentTurn={orderedOthers[0]?.isCurrentTurn}
                   />
                 )}
               </div>
@@ -224,13 +229,15 @@ export default function GameBoard({
                   <div className="text-slate-400 text-sm">{me?.name}</div>
                 </div>
                 <div className="text-right">
-                  {mySubmitted ? (
-                    <span className="text-green-400 text-sm font-medium">Card submitted ✓</span>
-                  ) : selectedCardId ? (
+                  {!isMyTurn ? (
+                    <span className="text-slate-400 text-sm">
+                      Waiting for {currentPlayer?.name || 'another player'}…
+                    </span>
+                  ) : isMyTurn && selectedCardId ? (
                     <span className="text-indigo-300 text-sm">Selected — tap again to deselect</span>
-                  ) : (
-                    <span className="text-slate-400 text-sm">Select a card to pass</span>
-                  )}
+                  ) : isMyTurn ? (
+                    <span className="text-yellow-300 text-sm font-medium">🎯 It's your turn! Pick a card</span>
+                  ) : null}
                 </div>
               </div>
 
@@ -241,7 +248,8 @@ export default function GameBoard({
                     key={card.id}
                     card={card}
                     selected={selectedCardId === card.id}
-                    onClick={mySubmitted ? undefined : () => onSelectCard(card.id)}
+                    onClick={isMyTurn ? () => onSelectCard(card.id) : undefined}
+                    disabled={!isMyTurn}
                     size="xl"
                     dealDelay={dealAnimate ? i * 120 : 0}
                     passing={passAnimate}

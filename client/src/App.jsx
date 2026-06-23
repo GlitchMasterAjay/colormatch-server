@@ -74,6 +74,12 @@ export default function App() {
       setTimeout(() => setDisconnectMsg(''), 5000);
     }));
 
+    cleanup.push(on('player:left', ({ message }) => {
+      setDisconnectMsg(message);
+      setGameOver(null);
+      setView(VIEW.WAITING_ROOM);
+    }));
+
     cleanup.push(on('host:changed', ({ newHostId }) => {
       if (newHostId === myId) {
         setDisconnectMsg('You are now the host.');

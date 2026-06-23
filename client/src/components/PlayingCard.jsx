@@ -1,7 +1,7 @@
 import React from 'react';
 import { getColorConfig } from '../utils/colors';
 
-export default function PlayingCard({ card, selected, onClick, size = 'md', hidden = false, dealDelay = 0, passing = false }) {
+export default function PlayingCard({ card, selected, onClick, size = 'md', hidden = false, dealDelay = 0, passing = false, disabled = false }) {
   const config = hidden ? null : getColorConfig(card?.color);
 
   const sizeClasses = {
@@ -37,14 +37,15 @@ export default function PlayingCard({ card, selected, onClick, size = 'md', hidd
 
   return (
     <div
-      className={`card ${config.cardClass} ${sizeClasses[size]} ${selected ? 'selected' : ''} ${dealDelay > 0 ? 'deal-animate' : ''} ${passing ? 'pass-animate' : ''} flex flex-col justify-between p-1.5`}
+      className={`card ${config.cardClass} ${sizeClasses[size]} ${selected ? 'selected' : ''} ${dealDelay > 0 ? 'deal-animate' : ''} ${passing ? 'pass-animate' : ''} ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} flex flex-col justify-between p-1.5`}
       style={animStyle}
-      onClick={onClick}
-      role={onClick ? 'button' : undefined}
-      tabIndex={onClick ? 0 : undefined}
-      onKeyDown={onClick ? (e) => e.key === 'Enter' && onClick() : undefined}
+      onClick={disabled ? undefined : onClick}
+      role={onClick && !disabled ? 'button' : undefined}
+      tabIndex={onClick && !disabled ? 0 : undefined}
+      onKeyDown={onClick && !disabled ? (e) => e.key === 'Enter' && onClick() : undefined}
       aria-label={`${config.label} card${selected ? ' (selected)' : ''}`}
       aria-pressed={selected}
+      aria-disabled={disabled}
     >
       {/* Top corner */}
       <div className="text-white font-bold leading-none">

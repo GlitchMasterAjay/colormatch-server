@@ -1,7 +1,7 @@
 import React from 'react';
 import PlayingCard from './PlayingCard';
 
-export default function OtherPlayer({ player, submitted, position }) {
+export default function OtherPlayer({ player, submitted, position, isCurrentTurn }) {
   // position: 'top' | 'left' | 'right'
   const isTop = position === 'top';
   const isLeft = position === 'left';
@@ -18,13 +18,14 @@ export default function OtherPlayer({ player, submitted, position }) {
       {/* Name badge */}
       <div className="flex items-center gap-2">
         <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
-          player?.connected ? 'bg-slate-600' : 'bg-red-900/50'
+          isCurrentTurn ? 'bg-yellow-500 text-white' : player?.connected ? 'bg-slate-600' : 'bg-red-900/50'
         }`}>
-          {player?.name?.[0]?.toUpperCase() || '?'}
+          {isCurrentTurn ? '🎯' : player?.name?.[0]?.toUpperCase() || '?'}
         </div>
         <div>
-          <div className="text-white text-sm font-medium leading-tight">
+          <div className={`text-sm font-medium leading-tight ${isCurrentTurn ? 'text-yellow-300' : 'text-white'}`}>
             {player?.name || 'Empty'}
+            {isCurrentTurn && <span className="ml-1 text-xs text-yellow-300">← Turn</span>}
             {!player?.connected && <span className="ml-1 text-red-400 text-xs">✗</span>}
           </div>
           {submitted && (
