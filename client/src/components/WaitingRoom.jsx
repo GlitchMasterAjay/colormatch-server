@@ -1,17 +1,19 @@
 import React, { useState } from 'react';
 
-const SEATS = 4;
-
 export default function WaitingRoom({ roomState, myId, isHost, onReady, onStart, onLeave }) {
   const [copied, setCopied] = useState(false);
+  const [rounds, setRounds] = useState(10);
 
   const players = roomState?.players || [];
-// Change this line:
-// const allReady = players.length === SEATS && players.every(p => p.connected && p.ready);
-
-// To this (Excludes the host from the ready check):
-const allReady = players.length === SEATS && players.every(p => p.id === roomState.hostId || (p.connected && p.ready));
+  const isWordMatch = roomState?.gameType === 'word-match';
+  const minPlayers = isWordMatch ? roomState?.gameConfig?.wordMatchMinPlayers || 3 : roomState?.gameConfig?.cardMatchSeats || 4;
+  const maxPlayers = isWordMatch ? roomState?.gameConfig?.wordMatchMaxPlayers || 10 : roomState?.gameConfig?.cardMatchSeats || 4;
+  const seats = maxPlayers;
+  const readyPlayers = players.filter(p => p.id === roomState?.hostId || (p.connected && p.ready));
+  const hasEnoughPlayers = isWordMatch ? players.length >= minPlayers : players.length === maxPlayers;
+  const allReady = hasEnoughPlayers && players.every(p => p.id === roomState?.hostId || (p.connected && p.ready));
   const me = players.find(p => p.id === myId);
+  const gameName = isWordMatch ? 'Word Match' : 'Color Match';
 
   const copyCode = () => {
     navigator.clipboard.writeText(roomState.id).then(() => {
@@ -21,17 +23,17 @@ const allReady = players.length === SEATS && players.every(p => p.id === roomSta
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-4 py-10"
-      style={{ background: 'radial-gradient(ellipse at center top, #1e3a5f 0%, #0F172A 60%)' }}>
-
-      <div className="w-full max-w-md">
-        {/* Header */}
+    <div
+      className="min-h-screen flex flex-col items-center justify-center px-4 py-10"
+      style={{ background: 'radial-gradient(ellipse at center top, #1e3a5f 0%, #0F172A 60%)' }}
+    >
+      <div className="w-full max-w-2xl">
         <div className="text-center mb-8">
+          <p className="text-indigo-300 font-semibold mb-1">{gameName}</p>
           <h1 className="text-3xl font-bold text-white mb-1">Game Lobby</h1>
-          <p className="text-slate-400">Waiting for players…</p>
+          <p className="text-slate-400">Waiting for players...</p>
         </div>
 
-        {/* Room code */}
         <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-5 mb-4 text-center">
           <p className="text-slate-400 text-sm mb-2">Room Code</p>
           <div className="room-code text-4xl font-bold text-white tracking-[0.2em] mb-3">
@@ -41,60 +43,89 @@ const allReady = players.length === SEATS && players.every(p => p.id === roomSta
             onClick={copyCode}
             className="text-sm px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg transition-colors"
           >
-            {copied ? '✓ Copied!' : 'Copy Code'}
+            {copied ? 'Copied' : 'Copy Code'}
           </button>
         </div>
 
-        {/* Player list */}
-        <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-5 mb-4">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="font-semibold text-white">Players</h2>
-            <span className="text-slate-400 text-sm">{players.length}/{SEATS}</span>
+        <div className="grid lg:grid-cols-[1fr_240px] gap-4 mb-4">
+          <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-5">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="font-semibold text-white">Players</h2>
+              <span className="text-slate-400 text-sm">
+                {players.length}/{maxPlayers} {isWordMatch && `min ${minPlayers}`}
+              </span>
+            </div>
+
+            <div className="grid sm:grid-cols-2 gap-2">
+              {Array.from({ length: seats }).map((_, i) => {
+                const player = players[i];
+                return (
+                  <div
+                    key={i}
+                    className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 ${
+                      player ? 'bg-slate-700/60' : 'bg-slate-700/20 border border-dashed border-slate-600'
+                    }`}
+                  >
+                    {player ? (
+                      <>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
+                          player.id === roomState?.hostId
+                            ? 'bg-yellow-500/20 text-yellow-300'
+                            : player.ready
+                              ? 'bg-green-500/20 text-green-400'
+                              : 'bg-slate-600 text-slate-300'
+                        }`}>
+                          {player.name[0].toUpperCase()}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium text-white truncate">
+                            {player.name}
+                            {player.id === myId && <span className="ml-1 text-xs text-indigo-400">(You)</span>}
+                          </div>
+                          <div className="text-xs text-slate-400">
+                            {player.id === roomState?.hostId ? 'Host' : player.ready ? 'Ready' : 'Not ready'}
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <span className="text-slate-500 text-sm w-full text-center">Open seat</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
-          <div className="space-y-2">
-            {Array.from({ length: SEATS }).map((_, i) => {
-              const player = players[i];
-              return (
-                <div
-                  key={i}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 ${
-                    player ? 'bg-slate-700/60' : 'bg-slate-700/20 border border-dashed border-slate-600'
-                  }`}
-                >
-                  {player ? (
-                    <>
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
-                        player.ready ? 'bg-green-500/20 text-green-400' : 'bg-slate-600 text-slate-300'
-                      }`}>
-                        {player.name[0].toUpperCase()}
-                      </div>
-                      <span className="flex-1 font-medium text-white">
-                        {player.name}
-                        {player.id === myId && <span className="ml-2 text-xs text-indigo-400">(You)</span>}
-                        {player.id === roomState?.hostId && <span className="ml-2 text-xs text-yellow-400">👑</span>}
-                      </span>
-                      {!player.connected && (
-                        <span className="text-xs text-red-400">Disconnected</span>
-                      )}
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                        player.ready ? 'bg-green-500/20 text-green-400' : 'bg-slate-600 text-slate-400'
-                      }`}>
-                        {player.ready ? 'Ready' : 'Not ready'}
-                      </span>
-                    </>
-                  ) : (
-                    <span className="text-slate-500 text-sm w-full text-center">Waiting for player…</span>
-                  )}
-                </div>
-              );
-            })}
+          <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-5">
+            <h2 className="font-semibold text-white mb-4">Setup</h2>
+            {isWordMatch ? (
+              <label className="block">
+                <span className="block text-sm text-slate-400 mb-2">Rounds</span>
+                <input
+                  type="number"
+                  min="10"
+                  max="30"
+                  value={rounds}
+                  disabled={!isHost}
+                  onChange={e => setRounds(e.target.value)}
+                  className="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-fuchsia-500 transition-colors"
+                />
+                <span className="block text-xs text-slate-500 mt-2">Choose 10-30 before starting.</span>
+              </label>
+            ) : (
+              <div className="text-sm text-slate-400 space-y-2">
+                <p>Exactly 4 players.</p>
+                <p>Collect 4 matching color cards to win.</p>
+              </div>
+            )}
+            <div className="mt-5 text-sm text-slate-400">
+              Ready: <span className="text-white font-semibold">{readyPlayers.length}/{players.length}</span>
+            </div>
           </div>
         </div>
 
-        {/* Action buttons */}
         <div className="space-y-3">
-          {me && (
+          {me && me.id !== roomState?.hostId && (
             <button
               onClick={() => onReady(!me.ready)}
               className={`w-full py-3 font-semibold rounded-xl transition-all duration-200 hover:scale-105 active:scale-95 ${
@@ -103,21 +134,21 @@ const allReady = players.length === SEATS && players.every(p => p.id === roomSta
                   : 'bg-green-600 hover:bg-green-500 text-white'
               }`}
             >
-              {me.ready ? 'Cancel Ready' : '✓ Ready'}
+              {me.ready ? 'Cancel Ready' : 'Ready'}
             </button>
           )}
 
           {isHost && (
             <button
-              onClick={onStart}
+              onClick={() => onStart(isWordMatch ? { rounds } : {})}
               disabled={!allReady}
               className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition-all duration-200 hover:scale-105 active:scale-95"
             >
-              {players.length < SEATS
-                ? `Need ${SEATS - players.length} more player${SEATS - players.length > 1 ? 's' : ''}`
+              {!hasEnoughPlayers
+                ? `Need ${Math.max(0, minPlayers - players.length)} more player${Math.max(0, minPlayers - players.length) === 1 ? '' : 's'}`
                 : !allReady
-                  ? 'Waiting for all to ready up…'
-                  : '🚀 Start Game'}
+                  ? 'Waiting for players to ready up...'
+                  : `Start ${gameName}`}
             </button>
           )}
 

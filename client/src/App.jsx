@@ -3,6 +3,7 @@ import { useSocket } from './hooks/useSocket';
 import Lobby from './components/Lobby';
 import WaitingRoom from './components/WaitingRoom';
 import GameBoard from './components/GameBoard';
+import WordMatchBoard from './components/WordMatchBoard';
 
 const VIEW = {
   LOBBY: 'lobby',
@@ -94,9 +95,9 @@ export default function App() {
     return () => cleanup.forEach(fn => typeof fn === 'function' && fn());
   }, [on, myId]);
 
-  const handleCreateRoom = useCallback((playerName) => {
+  const handleCreateRoom = useCallback((playerName, gameType) => {
     setError('');
-    emit('room:create', { playerName });
+    emit('room:create', { playerName, gameType });
   }, [emit]);
 
   const handleJoinRoom = useCallback((roomCode, playerName) => {
@@ -108,8 +109,8 @@ export default function App() {
     emit('player:ready', { ready });
   }, [emit]);
 
-  const handleStart = useCallback(() => {
-    emit('game:start');
+  const handleStart = useCallback((options = {}) => {
+    emit('game:start', options);
   }, [emit]);
 
   const handleSelectCard = useCallback((cardId) => {
@@ -134,6 +135,14 @@ export default function App() {
 
   const handleRestart = useCallback(() => {
     emit('game:restart');
+  }, [emit]);
+
+  const handleHostWord = useCallback((startingWord) => {
+    emit('word:hostWord', { startingWord });
+  }, [emit]);
+
+  const handleSubmitWord = useCallback((answer) => {
+    emit('word:submit', { answer });
   }, [emit]);
 
   const handleLeave = useCallback(() => {
@@ -165,6 +174,21 @@ const isHost = roomState && myId && String(roomState.hostId) === String(myId);
   }
 
   if (view === VIEW.GAME) {
+    if (roomState?.gameType === 'word-match') {
+      return (
+        <WordMatchBoard
+          roomState={roomState}
+          myId={myId}
+          isHost={isHost}
+          onHostWord={handleHostWord}
+          onSubmitWord={handleSubmitWord}
+          onRestart={handleRestart}
+          gameOver={gameOver}
+          disconnectMsg={disconnectMsg}
+        />
+      );
+    }
+
     return (
       <GameBoard
         roomState={roomState}

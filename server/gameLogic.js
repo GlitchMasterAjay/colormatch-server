@@ -4,6 +4,12 @@ const COLORS = ['red', 'blue', 'green', 'yellow'];
 const CARDS_PER_COLOR = 4;
 const PLAYERS_PER_ROOM = 4;
 const CARDS_PER_PLAYER = 4;
+const WORD_MATCH_MIN_PLAYERS = 3;
+const WORD_MATCH_MAX_PLAYERS = 10;
+const GAME_TYPES = {
+  CARD_MATCH: 'card-match',
+  WORD_MATCH: 'word-match'
+};
 
 function createDeck() {
   const deck = [];
@@ -78,9 +84,10 @@ function passCards(hands, playerOrder, selectedCards) {
   return newHands;
 }
 
-function createRoom(hostId, hostName) {
+function createRoom(hostId, hostName, gameType = GAME_TYPES.CARD_MATCH) {
   return {
     id: generateRoomCode(),
+    gameType,
     hostId,
     players: [{ id: hostId, name: hostName, ready: false, connected: true }],
     gameState: 'lobby', // lobby | playing | finished
@@ -90,7 +97,26 @@ function createRoom(hostId, hostName) {
     selectedCards: {}, // playerId -> cardId they selected
     round: 0,
     winner: null,
-    deck: []
+    deck: [],
+    wordMatch: createWordMatchState()
+  };
+}
+
+function createWordMatchState() {
+  return {
+    totalRounds: 10,
+    currentRound: 0,
+    phase: 'setup', // setup | host_word | matching | reveal | finished
+    hostPlayerId: null,
+    startingWord: '',
+    hostAnswer: '',
+    submissions: {},
+    submittedAt: {},
+    scores: {},
+    leaderboard: [],
+    lastResult: null,
+    matchEndsAt: null,
+    revealEndsAt: null
   };
 }
 
@@ -123,8 +149,23 @@ function startGame(room) {
 }
 
 function getPublicRoomState(room) {
+  const wordMatch = room.wordMatch ? {
+    totalRounds: room.wordMatch.totalRounds,
+    currentRound: room.wordMatch.currentRound,
+    phase: room.wordMatch.phase,
+    hostPlayerId: room.wordMatch.hostPlayerId,
+    startingWord: room.wordMatch.startingWord,
+    scores: room.wordMatch.scores,
+    leaderboard: room.wordMatch.leaderboard,
+    lastResult: room.wordMatch.lastResult,
+    matchEndsAt: room.wordMatch.matchEndsAt,
+    revealEndsAt: room.wordMatch.revealEndsAt,
+    submittedPlayers: Object.keys(room.wordMatch.submissions || {})
+  } : null;
+
   return {
     id: room.id,
+    gameType: room.gameType || GAME_TYPES.CARD_MATCH,
     gameState: room.gameState,
     hostId: room.hostId,
     currentPlayerTurn: room.playerOrder[room.currentPlayerIndex] || null,
@@ -139,7 +180,13 @@ function getPublicRoomState(room) {
     playerOrder: room.playerOrder,
     round: room.round,
     winner: room.winner,
-    submittedPlayers: Object.keys(room.selectedCards)
+    submittedPlayers: Object.keys(room.selectedCards),
+    wordMatch,
+    gameConfig: {
+      cardMatchSeats: PLAYERS_PER_ROOM,
+      wordMatchMinPlayers: WORD_MATCH_MIN_PLAYERS,
+      wordMatchMaxPlayers: WORD_MATCH_MAX_PLAYERS
+    }
   };
 }
 
@@ -157,5 +204,9 @@ module.exports = {
   checkWinner,
   getPublicRoomState,
   getPlayerPrivateState,
-  PLAYERS_PER_ROOM
+  PLAYERS_PER_ROOM,
+  WORD_MATCH_MIN_PLAYERS,
+  WORD_MATCH_MAX_PLAYERS,
+  GAME_TYPES,
+  createWordMatchState
 };
