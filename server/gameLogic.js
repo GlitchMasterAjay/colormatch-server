@@ -6,9 +6,12 @@ const PLAYERS_PER_ROOM = 4;
 const CARDS_PER_PLAYER = 4;
 const WORD_MATCH_MIN_PLAYERS = 3;
 const WORD_MATCH_MAX_PLAYERS = 10;
+const CONTACT_BLOCK_MIN_PLAYERS = 3;
+const CONTACT_BLOCK_MAX_PLAYERS = 10;
 const GAME_TYPES = {
   CARD_MATCH: 'card-match',
-  WORD_MATCH: 'word-match'
+  WORD_MATCH: 'word-match',
+  CONTACT_BLOCK: 'contact-block'
 };
 
 function createDeck() {
@@ -98,7 +101,8 @@ function createRoom(hostId, hostName, gameType = GAME_TYPES.CARD_MATCH) {
     round: 0,
     winner: null,
     deck: [],
-    wordMatch: createWordMatchState()
+    wordMatch: createWordMatchState(),
+    contactBlock: createContactBlockState()
   };
 }
 
@@ -117,6 +121,33 @@ function createWordMatchState() {
     lastResult: null,
     matchEndsAt: null,
     revealEndsAt: null
+  };
+}
+
+function createContactBlockState() {
+  return {
+    phase: 'setup', // setup | secret_entry | clue_submission | decision | answer | finished
+    timerMinutes: 5,
+    requiredMatches: 2,
+    activeHostId: null,
+    secretWord: '',
+    revealedLength: 0,
+    currentClue: null,
+    clueAuthorId: null,
+    contactVotes: [],
+    forgetVotes: [],
+    answerParticipants: [],
+    answers: {},
+    usedWords: [],
+    blockedWords: [],
+    blockHistory: [],
+    totalSuccessfulContacts: 0,
+    winner: null,
+    gameEndsAt: null,
+    roundEndedAt: null,
+    clueCycle: 0,
+    clueSubmittedAt: null,
+    lastResolution: null
   };
 }
 
@@ -163,6 +194,29 @@ function getPublicRoomState(room) {
     submittedPlayers: Object.keys(room.wordMatch.submissions || {})
   } : null;
 
+  const contactBlock = room.contactBlock ? {
+    phase: room.contactBlock.phase,
+    timerMinutes: room.contactBlock.timerMinutes,
+    requiredMatches: room.contactBlock.requiredMatches,
+    activeHostId: room.contactBlock.activeHostId,
+    revealedPrefix: room.contactBlock.secretWord.slice(0, room.contactBlock.revealedLength),
+    revealedMask: buildRevealedMask(room.contactBlock.secretWord, room.contactBlock.revealedLength),
+    currentClue: room.contactBlock.currentClue,
+    clueAuthorId: room.contactBlock.clueAuthorId,
+    contactVotes: room.contactBlock.contactVotes,
+    forgetVotes: room.contactBlock.forgetVotes,
+    answerParticipants: room.contactBlock.answerParticipants,
+    usedWords: room.contactBlock.usedWords,
+    blockedWords: room.contactBlock.blockedWords,
+    blockHistory: room.contactBlock.blockHistory,
+    totalSuccessfulContacts: room.contactBlock.totalSuccessfulContacts,
+    gameEndsAt: room.contactBlock.gameEndsAt,
+    roundEndedAt: room.contactBlock.roundEndedAt,
+    clueCycle: room.contactBlock.clueCycle,
+    lastResolution: room.contactBlock.lastResolution,
+    winner: room.contactBlock.winner
+  } : null;
+
   return {
     id: room.id,
     gameType: room.gameType || GAME_TYPES.CARD_MATCH,
@@ -182,19 +236,61 @@ function getPublicRoomState(room) {
     winner: room.winner,
     submittedPlayers: Object.keys(room.selectedCards),
     wordMatch,
+    contactBlock,
     gameConfig: {
       cardMatchSeats: PLAYERS_PER_ROOM,
       wordMatchMinPlayers: WORD_MATCH_MIN_PLAYERS,
-      wordMatchMaxPlayers: WORD_MATCH_MAX_PLAYERS
+      wordMatchMaxPlayers: WORD_MATCH_MAX_PLAYERS,
+      contactBlockMinPlayers: CONTACT_BLOCK_MIN_PLAYERS,
+      contactBlockMaxPlayers: CONTACT_BLOCK_MAX_PLAYERS
     }
   };
 }
 
 function getPlayerPrivateState(room, playerId) {
-  return {
+  const privateState = {
     hand: room.hands[playerId] || [],
     selectedCardId: room.selectedCards[playerId] || null
   };
+
+  if (room.contactBlock) {
+    privateState.contactBlock = {
+      secretWord: room.contactBlock.activeHostId === playerId ? room.contactBlock.secretWord : '',
+      myAnswerSubmitted: !!room.contactBlock.answers[playerId]
+    };
+  }
+
+  return privateState;
+}
+
+function buildRevealedMask(secretWord, revealedLength) {
+  if (!secretWord) return '';
+  const prefix = secretWord.slice(0, revealedLength);
+  const hidden = Array.from({ length: Math.max(0, secretWord.length - revealedLength) }, () => '_').join(' ');
+  return hidden ? `${prefix}${prefix ? ' ' : ''}${hidden}` : prefix;
+}
+
+function resetCardMatchState(room) {
+  room.hands = {};
+  room.playerOrder = [];
+  room.currentPlayerIndex = 0;
+  room.selectedCards = {};
+  room.winner = null;
+  room.deck = [];
+}
+
+function resetWordMatchState(room) {
+  room.wordMatch = createWordMatchState();
+}
+
+function resetContactBlockState(room) {
+  room.contactBlock = createContactBlockState();
+}
+
+function resetAllGameState(room) {
+  resetCardMatchState(room);
+  resetWordMatchState(room);
+  resetContactBlockState(room);
 }
 
 module.exports = {
@@ -207,6 +303,14 @@ module.exports = {
   PLAYERS_PER_ROOM,
   WORD_MATCH_MIN_PLAYERS,
   WORD_MATCH_MAX_PLAYERS,
+  CONTACT_BLOCK_MIN_PLAYERS,
+  CONTACT_BLOCK_MAX_PLAYERS,
   GAME_TYPES,
-  createWordMatchState
+  createWordMatchState,
+  createContactBlockState,
+  buildRevealedMask,
+  resetCardMatchState,
+  resetWordMatchState,
+  resetContactBlockState,
+  resetAllGameState
 };

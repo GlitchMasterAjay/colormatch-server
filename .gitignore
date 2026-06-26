@@ -17,10 +17,16 @@ server/.env
 server/.env.*
 
 # logs
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+
+# test / cache output
+coverage/
+.cache/
+.eslintcache
 
 # OS / editor
 .DS_Store

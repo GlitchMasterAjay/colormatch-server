@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 
 const GAMES = {
   CARD_MATCH: 'card-match',
-  WORD_MATCH: 'word-match'
+  WORD_MATCH: 'word-match',
+  CONTACT_BLOCK: 'contact-block'
 };
 
 export default function Lobby({ onCreateRoom, onJoinRoom, error, connected }) {
@@ -21,7 +22,12 @@ export default function Lobby({ onCreateRoom, onJoinRoom, error, connected }) {
     if (playerName.trim() && roomCode.trim()) onJoinRoom(roomCode.trim().toUpperCase(), playerName.trim());
   };
 
-  const selectedGameName = selectedGame === GAMES.WORD_MATCH ? 'Word Match' : 'Color Match';
+  const selectedGameName =
+    selectedGame === GAMES.WORD_MATCH
+      ? 'Word Match'
+      : selectedGame === GAMES.CONTACT_BLOCK
+        ? 'Contact and Block'
+        : 'Color Match';
 
   return (
     <div
@@ -48,7 +54,7 @@ export default function Lobby({ onCreateRoom, onJoinRoom, error, connected }) {
 
         {view === 'home' && (
           <div className="space-y-5">
-            <div className="grid md:grid-cols-2 gap-4">
+            <div className="grid md:grid-cols-3 gap-4">
               <button
                 onClick={() => setSelectedGame(GAMES.CARD_MATCH)}
                 className={`text-left p-5 rounded-xl border transition-all duration-200 ${
@@ -73,6 +79,19 @@ export default function Lobby({ onCreateRoom, onJoinRoom, error, connected }) {
                 <div className="text-sm text-slate-400 mb-2">3-10 players</div>
                 <div className="text-2xl font-bold text-white mb-2">Word Match</div>
                 <p className="text-sm text-slate-300">Rotate hosts, reveal a starting word, and match answers in 10 seconds.</p>
+              </button>
+
+              <button
+                onClick={() => setSelectedGame(GAMES.CONTACT_BLOCK)}
+                className={`text-left p-5 rounded-xl border transition-all duration-200 ${
+                  selectedGame === GAMES.CONTACT_BLOCK
+                    ? 'bg-emerald-600/20 border-emerald-400 shadow-lg shadow-emerald-950/30'
+                    : 'bg-slate-700/50 border-slate-600 hover:border-slate-400'
+                }`}
+              >
+                <div className="text-sm text-slate-400 mb-2">3-10 players</div>
+                <div className="text-2xl font-bold text-white mb-2">Contact and Block</div>
+                <p className="text-sm text-slate-300">One host defends a hidden word while the room coordinates clues, contacts, and matched guesses.</p>
               </button>
             </div>
 

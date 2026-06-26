@@ -3,17 +3,38 @@ import React, { useState } from 'react';
 export default function WaitingRoom({ roomState, myId, isHost, onReady, onStart, onLeave }) {
   const [copied, setCopied] = useState(false);
   const [rounds, setRounds] = useState(10);
+  const [activeHostId, setActiveHostId] = useState('');
+  const [timerMinutes, setTimerMinutes] = useState(5);
+  const [requiredMatches, setRequiredMatches] = useState(2);
 
   const players = roomState?.players || [];
   const isWordMatch = roomState?.gameType === 'word-match';
-  const minPlayers = isWordMatch ? roomState?.gameConfig?.wordMatchMinPlayers || 3 : roomState?.gameConfig?.cardMatchSeats || 4;
-  const maxPlayers = isWordMatch ? roomState?.gameConfig?.wordMatchMaxPlayers || 10 : roomState?.gameConfig?.cardMatchSeats || 4;
+  const isContactBlock = roomState?.gameType === 'contact-block';
+  const minPlayers = isWordMatch
+    ? roomState?.gameConfig?.wordMatchMinPlayers || 3
+    : isContactBlock
+      ? roomState?.gameConfig?.contactBlockMinPlayers || 3
+      : roomState?.gameConfig?.cardMatchSeats || 4;
+  const maxPlayers = isWordMatch
+    ? roomState?.gameConfig?.wordMatchMaxPlayers || 10
+    : isContactBlock
+      ? roomState?.gameConfig?.contactBlockMaxPlayers || 10
+      : roomState?.gameConfig?.cardMatchSeats || 4;
   const seats = maxPlayers;
   const readyPlayers = players.filter(p => p.id === roomState?.hostId || (p.connected && p.ready));
-  const hasEnoughPlayers = isWordMatch ? players.length >= minPlayers : players.length === maxPlayers;
+  const hasEnoughPlayers = isWordMatch || isContactBlock ? players.length >= minPlayers : players.length === maxPlayers;
   const allReady = hasEnoughPlayers && players.every(p => p.id === roomState?.hostId || (p.connected && p.ready));
   const me = players.find(p => p.id === myId);
-  const gameName = isWordMatch ? 'Word Match' : 'Color Match';
+  const gameName = isWordMatch ? 'Word Match' : isContactBlock ? 'Contact and Block' : 'Color Match';
+
+  React.useEffect(() => {
+    if (!activeHostId && players.length) {
+      setActiveHostId(players[0].id);
+    }
+    if (requiredMatches > players.length) {
+      setRequiredMatches(Math.max(2, players.length));
+    }
+  }, [players, activeHostId, requiredMatches]);
 
   const copyCode = () => {
     navigator.clipboard.writeText(roomState.id).then(() => {
@@ -112,6 +133,50 @@ export default function WaitingRoom({ roomState, myId, isHost, onReady, onStart,
                 />
                 <span className="block text-xs text-slate-500 mt-2">Choose 10-30 before starting.</span>
               </label>
+            ) : isContactBlock ? (
+              <div className="space-y-4">
+                <label className="block">
+                  <span className="block text-sm text-slate-400 mb-2">Active Host</span>
+                  <select
+                    value={activeHostId}
+                    disabled={!isHost}
+                    onChange={e => setActiveHostId(e.target.value)}
+                    className="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-colors"
+                  >
+                    {players.map(player => (
+                      <option key={player.id} value={player.id}>{player.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="block text-sm text-slate-400 mb-2">Game Timer</span>
+                  <select
+                    value={timerMinutes}
+                    disabled={!isHost}
+                    onChange={e => setTimerMinutes(Number(e.target.value))}
+                    className="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-colors"
+                  >
+                    {[2, 5, 10, 15].map(value => (
+                      <option key={value} value={value}>{value} minutes</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="block text-sm text-slate-400 mb-2">Required Contact Matches</span>
+                  <select
+                    value={requiredMatches}
+                    disabled={!isHost}
+                    onChange={e => setRequiredMatches(Number(e.target.value))}
+                    className="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-colors"
+                  >
+                    {Array.from({ length: Math.max(0, players.length - 1) }, (_, index) => index + 2)
+                      .filter(value => value <= players.length)
+                      .map(value => (
+                        <option key={value} value={value}>{value} players</option>
+                      ))}
+                  </select>
+                </label>
+              </div>
             ) : (
               <div className="text-sm text-slate-400 space-y-2">
                 <p>Exactly 4 players.</p>
@@ -140,7 +205,13 @@ export default function WaitingRoom({ roomState, myId, isHost, onReady, onStart,
 
           {isHost && (
             <button
-              onClick={() => onStart(isWordMatch ? { rounds } : {})}
+              onClick={() => onStart(
+                isWordMatch
+                  ? { rounds }
+                  : isContactBlock
+                    ? { activeHostId, timerMinutes, requiredMatches }
+                    : {}
+              )}
               disabled={!allReady}
               className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition-all duration-200 hover:scale-105 active:scale-95"
             >

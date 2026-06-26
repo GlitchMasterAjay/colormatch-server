@@ -3,19 +3,30 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const {
-  createRoom, startGame, passCards, checkWinner,
-  getPublicRoomState, getPlayerPrivateState, PLAYERS_PER_ROOM,
-  WORD_MATCH_MIN_PLAYERS, WORD_MATCH_MAX_PLAYERS, GAME_TYPES, createWordMatchState
+  createRoom,
+  startGame,
+  checkWinner,
+  getPublicRoomState,
+  getPlayerPrivateState,
+  PLAYERS_PER_ROOM,
+  WORD_MATCH_MIN_PLAYERS,
+  WORD_MATCH_MAX_PLAYERS,
+  CONTACT_BLOCK_MIN_PLAYERS,
+  CONTACT_BLOCK_MAX_PLAYERS,
+  GAME_TYPES,
+  createWordMatchState,
+  resetAllGameState
 } = require('./gameLogic');
 
 const app = express();
-app.use(cors());
+const clientOrigin = process.env.CLIENT_ORIGIN || true;
+app.use(cors({ origin: clientOrigin, credentials: true }));
 app.use(express.json());
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { 
-    origin: ["https://client-nu-pink.vercel.app/", "*"],
+  cors: {
+    origin: clientOrigin,
     methods: ['GET', 'POST'],
     credentials: true
   }
@@ -24,6 +35,7 @@ const io = new Server(server, {
 const rooms = {};
 const playerRooms = {};
 const wordTimers = {};
+const contactTimers = {};
 
 function emitRoomState(roomCode) {
   const room = rooms[roomCode];
@@ -32,8 +44,7 @@ function emitRoomState(roomCode) {
   io.to(roomCode).emit('room:state', publicState);
   room.players.forEach(player => {
     if (player.connected) {
-      const privateState = getPlayerPrivateState(room, player.id);
-      io.to(player.socketId).emit('player:state', privateState);
+      io.to(player.socketId).emit('player:state', getPlayerPrivateState(room, player.id));
     }
   });
 }
@@ -42,8 +53,8 @@ function emitError(socket, message) {
   socket.emit('error:message', { message });
 }
 
-function normalizeWord(value) {
-  return String(value || '').trim().replace(/\s+/g, ' ').slice(0, 32);
+function normalizeWord(value, limit = 32) {
+  return String(value || '').trim().replace(/\s+/g, ' ').slice(0, limit);
 }
 
 function sanitizeRounds(value) {
@@ -52,15 +63,14 @@ function sanitizeRounds(value) {
   return Math.max(10, Math.min(30, Math.floor(rounds)));
 }
 
-function getConnectedPlayers(room) {
-  return room.players.filter(p => p.connected);
+function sanitizeTimerMinutes(value) {
+  const minutes = Number(value);
+  if (![2, 5, 10, 15].includes(minutes)) return 5;
+  return minutes;
 }
 
-function clearWordTimers(roomCode) {
-  const timers = wordTimers[roomCode];
-  if (!timers) return;
-  Object.values(timers).forEach(timer => clearTimeout(timer));
-  delete wordTimers[roomCode];
+function getConnectedPlayers(room) {
+  return room.players.filter(player => player.connected);
 }
 
 function rankPlayers(players, scores) {
@@ -70,6 +80,30 @@ function rankPlayers(players, scores) {
     .map((player, index) => ({ ...player, rank: index + 1 }));
 }
 
+function clearWordTimers(roomCode) {
+  const timers = wordTimers[roomCode];
+  if (!timers) return;
+  Object.values(timers).forEach(timer => clearTimeout(timer));
+  delete wordTimers[roomCode];
+}
+
+function clearContactTimers(roomCode) {
+  const timers = contactTimers[roomCode];
+  if (!timers) return;
+  Object.values(timers).forEach(timer => clearTimeout(timer));
+  delete contactTimers[roomCode];
+}
+
+function resetRoomToLobby(room, roomCode) {
+  clearWordTimers(roomCode);
+  clearContactTimers(roomCode);
+  room.gameState = 'lobby';
+  resetAllGameState(room);
+  room.players.forEach(player => {
+    player.ready = false;
+  });
+}
+
 function beginWordRound(roomCode) {
   const room = rooms[roomCode];
   if (!room || room.gameType !== GAME_TYPES.WORD_MATCH) return;
@@ -77,9 +111,7 @@ function beginWordRound(roomCode) {
   clearWordTimers(roomCode);
   const connectedPlayers = getConnectedPlayers(room);
   if (connectedPlayers.length < WORD_MATCH_MIN_PLAYERS) {
-    room.gameState = 'lobby';
-    room.wordMatch = createWordMatchState();
-    room.players.forEach(p => { p.ready = false; });
+    resetRoomToLobby(room, roomCode);
     io.to(roomCode).emit('player:left', {
       message: `Need at least ${WORD_MATCH_MIN_PLAYERS} players. Returning to lobby...`
     });
@@ -93,9 +125,8 @@ function beginWordRound(roomCode) {
   }
 
   const currentHostId = room.playerOrder[room.wordMatch.currentRound % room.playerOrder.length];
-  const hostStillHere = connectedPlayers.some(p => p.id === currentHostId);
-  if (!hostStillHere) {
-    room.playerOrder = connectedPlayers.map(p => p.id);
+  if (!connectedPlayers.some(player => player.id === currentHostId)) {
+    room.playerOrder = connectedPlayers.map(player => player.id);
   }
 
   room.wordMatch.currentRound += 1;
@@ -170,22 +201,204 @@ function finishWordGame(roomCode) {
 function maybeRevealIfAllSubmitted(roomCode) {
   const room = rooms[roomCode];
   if (!room || room.gameType !== GAME_TYPES.WORD_MATCH || room.wordMatch.phase !== 'matching') return;
-  const connectedIds = getConnectedPlayers(room).map(p => p.id);
+  const connectedIds = getConnectedPlayers(room).map(player => player.id);
   if (connectedIds.every(id => room.wordMatch.submissions[id])) {
     revealWordRound(roomCode);
   }
 }
 
-io.on('connection', (socket) => {
+function getGuesserIds(room) {
+  return getConnectedPlayers(room)
+    .filter(player => player.id !== room.contactBlock.activeHostId)
+    .map(player => player.id);
+}
+
+function startContactCluePhase(roomCode) {
+  const room = rooms[roomCode];
+  if (!room || room.gameType !== GAME_TYPES.CONTACT_BLOCK || room.gameState !== 'playing') return;
+  if (room.contactBlock.winner) return;
+
+  room.contactBlock.phase = 'clue_submission';
+  room.contactBlock.currentClue = null;
+  room.contactBlock.clueAuthorId = null;
+  room.contactBlock.contactVotes = [];
+  room.contactBlock.forgetVotes = [];
+  room.contactBlock.answerParticipants = [];
+  room.contactBlock.answers = {};
+  room.contactBlock.lastResolution = null;
+  room.contactBlock.roundEndedAt = null;
+  room.contactBlock.clueCycle += 1;
+  room.contactBlock.clueSubmittedAt = null;
+  emitRoomState(roomCode);
+}
+
+function finishContactGame(roomCode, winnerType) {
+  const room = rooms[roomCode];
+  if (!room || room.gameType !== GAME_TYPES.CONTACT_BLOCK) return;
+  clearContactTimers(roomCode);
+  room.gameState = 'finished';
+  room.contactBlock.phase = 'finished';
+  room.contactBlock.winner = winnerType;
+  room.contactBlock.roundEndedAt = Date.now();
+
+  const activeHost = room.players.find(player => player.id === room.contactBlock.activeHostId);
+  io.to(roomCode).emit('game:over', {
+    winnerType,
+    secretWord: room.contactBlock.secretWord,
+    activeHostName: activeHost ? activeHost.name : 'Host'
+  });
+  emitRoomState(roomCode);
+}
+
+function revealNextContactLetter(roomCode, matchedWord, count) {
+  const room = rooms[roomCode];
+  if (!room || room.gameType !== GAME_TYPES.CONTACT_BLOCK) return;
+
+  room.contactBlock.revealedLength = Math.min(
+    room.contactBlock.secretWord.length,
+    room.contactBlock.revealedLength + 1
+  );
+  room.contactBlock.totalSuccessfulContacts += 1;
+  room.contactBlock.lastResolution = {
+    result: 'success',
+    matchedWord,
+    matchCount: count
+  };
+
+  if (room.contactBlock.revealedLength >= room.contactBlock.secretWord.length) {
+    finishContactGame(roomCode, 'players');
+    return;
+  }
+
+  startContactCluePhase(roomCode);
+}
+
+function resolveContactAnswers(roomCode) {
+  const room = rooms[roomCode];
+  if (!room || room.gameType !== GAME_TYPES.CONTACT_BLOCK || room.contactBlock.phase !== 'answer') return;
+
+  const normalizedAnswers = Object.values(room.contactBlock.answers);
+  const counts = {};
+  normalizedAnswers.forEach(answer => {
+    counts[answer] = (counts[answer] || 0) + 1;
+  });
+
+  Object.keys(room.contactBlock.answers).forEach(playerId => {
+    const answer = room.contactBlock.answers[playerId];
+    if (!room.contactBlock.usedWords.includes(answer)) {
+      room.contactBlock.usedWords.push(answer);
+    }
+  });
+
+  let winnerWord = '';
+  let winnerCount = 0;
+  Object.entries(counts).forEach(([word, count]) => {
+    if (count >= room.contactBlock.requiredMatches && count > winnerCount) {
+      winnerWord = word;
+      winnerCount = count;
+    }
+  });
+
+  if (winnerWord) {
+    revealNextContactLetter(roomCode, winnerWord, winnerCount);
+    return;
+  }
+
+  room.contactBlock.lastResolution = {
+    result: 'miss',
+    submittedAnswers: room.contactBlock.answerParticipants.map(playerId => {
+      const player = room.players.find(entry => entry.id === playerId);
+      return {
+        playerId,
+        playerName: player ? player.name : 'Player',
+        answer: room.contactBlock.answers[playerId] || ''
+      };
+    })
+  };
+  startContactCluePhase(roomCode);
+}
+
+function maybeResolveContactDecision(roomCode) {
+  const room = rooms[roomCode];
+  if (!room || room.gameType !== GAME_TYPES.CONTACT_BLOCK || room.contactBlock.phase !== 'decision') return;
+
+  const guesserIds = getGuesserIds(room);
+  if (room.contactBlock.contactVotes.length >= room.contactBlock.requiredMatches) {
+    room.contactBlock.phase = 'answer';
+    room.contactBlock.answerParticipants = [...room.contactBlock.contactVotes];
+    room.contactBlock.answers = {};
+    room.contactBlock.lastResolution = null;
+    emitRoomState(roomCode);
+    return;
+  }
+
+  if (room.contactBlock.forgetVotes.length === guesserIds.length && guesserIds.length > 0) {
+    room.contactBlock.lastResolution = { result: 'forgot' };
+    startContactCluePhase(roomCode);
+    return;
+  }
+
+  const totalVotes = new Set([
+    ...room.contactBlock.contactVotes,
+    ...room.contactBlock.forgetVotes
+  ]);
+
+  if (totalVotes.size === guesserIds.length) {
+    room.contactBlock.lastResolution = { result: 'not-enough-contact' };
+    startContactCluePhase(roomCode);
+  }
+}
+
+function startContactGame(roomCode, options) {
+  const room = rooms[roomCode];
+  if (!room || room.gameType !== GAME_TYPES.CONTACT_BLOCK) return;
+
+  clearContactTimers(roomCode);
+  room.gameState = 'playing';
+  room.contactBlock.timerMinutes = sanitizeTimerMinutes(options.timerMinutes);
+  room.contactBlock.requiredMatches = Math.max(
+    2,
+    Math.min(getConnectedPlayers(room).length, Number(options.requiredMatches) || 2)
+  );
+  room.contactBlock.activeHostId = options.activeHostId;
+  room.contactBlock.secretWord = '';
+  room.contactBlock.revealedLength = 0;
+  room.contactBlock.currentClue = null;
+  room.contactBlock.clueAuthorId = null;
+  room.contactBlock.contactVotes = [];
+  room.contactBlock.forgetVotes = [];
+  room.contactBlock.answerParticipants = [];
+  room.contactBlock.answers = {};
+  room.contactBlock.usedWords = [];
+  room.contactBlock.blockedWords = [];
+  room.contactBlock.blockHistory = [];
+  room.contactBlock.totalSuccessfulContacts = 0;
+  room.contactBlock.gameEndsAt = Date.now() + room.contactBlock.timerMinutes * 60 * 1000;
+  room.contactBlock.roundEndedAt = null;
+  room.contactBlock.clueCycle = 0;
+  room.contactBlock.clueSubmittedAt = null;
+  room.contactBlock.lastResolution = null;
+  room.contactBlock.winner = null;
+  room.contactBlock.phase = 'secret_entry';
+
+  contactTimers[roomCode] = {
+    game: setTimeout(() => finishContactGame(roomCode, 'host'), room.contactBlock.timerMinutes * 60 * 1000)
+  };
+
+  io.to(roomCode).emit('game:started', { round: 1 });
+  emitRoomState(roomCode);
+}
+
+io.on('connection', socket => {
   console.log(`[+] Connected: ${socket.id}`);
 
-  // --- CREATE ROOM ---
   socket.on('room:create', ({ playerName, gameType }) => {
     if (!playerName || playerName.trim().length < 1) {
       return emitError(socket, 'Player name is required.');
     }
+
     const name = playerName.trim().slice(0, 20);
-    const selectedGameType = gameType === GAME_TYPES.WORD_MATCH ? GAME_TYPES.WORD_MATCH : GAME_TYPES.CARD_MATCH;
+    const selectedGameType = Object.values(GAME_TYPES).includes(gameType) ? gameType : GAME_TYPES.CARD_MATCH;
     const room = createRoom(socket.id, name, selectedGameType);
     room.players[0].socketId = socket.id;
     rooms[room.id] = room;
@@ -195,7 +408,6 @@ io.on('connection', (socket) => {
     emitRoomState(room.id);
   });
 
-  // --- JOIN ROOM ---
   socket.on('room:join', ({ roomCode, playerName }) => {
     if (!playerName || playerName.trim().length < 1) {
       return emitError(socket, 'Player name is required.');
@@ -208,14 +420,11 @@ io.on('connection', (socket) => {
     if (room.gameState !== 'lobby') return emitError(socket, 'Game already in progress.');
 
     const name = playerName.trim().slice(0, 20);
-
-    // Allow reconnect with same name if previously disconnected
-    const existingPlayer = room.players.find(p => p.name.toLowerCase() === name.toLowerCase());
+    const existingPlayer = room.players.find(player => player.name.toLowerCase() === name.toLowerCase());
     if (existingPlayer) {
       if (existingPlayer.connected) {
         return emitError(socket, 'That name is already taken in this room.');
       }
-      // Reconnect: update socket ID
       existingPlayer.id = socket.id;
       existingPlayer.socketId = socket.id;
       existingPlayer.connected = true;
@@ -226,9 +435,9 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // Only count connected players for room full check
-    const connectedCount = room.players.filter(p => p.connected).length;
-    const maxPlayers = room.gameType === GAME_TYPES.WORD_MATCH ? WORD_MATCH_MAX_PLAYERS : PLAYERS_PER_ROOM;
+    const maxPlayers =
+      room.gameType === GAME_TYPES.CARD_MATCH ? PLAYERS_PER_ROOM : CONTACT_BLOCK_MAX_PLAYERS;
+    const connectedCount = getConnectedPlayers(room).length;
     if (connectedCount >= maxPlayers || room.players.length >= maxPlayers) {
       return emitError(socket, `Room is full (${maxPlayers} players max).`);
     }
@@ -240,39 +449,37 @@ io.on('connection', (socket) => {
     emitRoomState(code);
   });
 
-  // --- PLAYER READY ---
   socket.on('player:ready', ({ ready }) => {
     const roomCode = playerRooms[socket.id];
     const room = rooms[roomCode];
     if (!room || room.gameState !== 'lobby') return;
-    const player = room.players.find(p => p.id === socket.id);
+    const player = room.players.find(entry => entry.id === socket.id);
     if (!player) return;
     player.ready = !!ready;
     emitRoomState(roomCode);
   });
 
-  // --- START GAME ---
-  socket.on('game:start', ({ rounds } = {}) => {
+  socket.on('game:start', (payload = {}) => {
     const roomCode = playerRooms[socket.id];
     const room = rooms[roomCode];
     if (!room) return;
     if (room.hostId !== socket.id) return emitError(socket, 'Only the host can start the game.');
     if (room.gameState !== 'lobby') return;
 
-    const connectedPlayers = room.players.filter(p => p.connected);
+    const connectedPlayers = getConnectedPlayers(room);
     if (room.gameType === GAME_TYPES.WORD_MATCH) {
       if (connectedPlayers.length < WORD_MATCH_MIN_PLAYERS || connectedPlayers.length > WORD_MATCH_MAX_PLAYERS) {
         return emitError(socket, `Need ${WORD_MATCH_MIN_PLAYERS}-${WORD_MATCH_MAX_PLAYERS} connected players to start.`);
       }
-      if (!connectedPlayers.every(p => p.id === room.hostId || p.ready)) {
+      if (!connectedPlayers.every(player => player.id === room.hostId || player.ready)) {
         return emitError(socket, 'All non-host players must be ready.');
       }
 
       room.players = connectedPlayers;
-      room.playerOrder = connectedPlayers.map(p => p.id);
+      room.playerOrder = connectedPlayers.map(player => player.id);
       room.wordMatch = createWordMatchState();
-      room.wordMatch.totalRounds = sanitizeRounds(rounds);
-      room.wordMatch.scores = Object.fromEntries(room.players.map(p => [p.id, 0]));
+      room.wordMatch.totalRounds = sanitizeRounds(payload.rounds);
+      room.wordMatch.scores = Object.fromEntries(room.players.map(player => [player.id, 0]));
       room.wordMatch.leaderboard = rankPlayers(room.players, room.wordMatch.scores);
       room.gameState = 'playing';
       io.to(roomCode).emit('game:started', { round: 1 });
@@ -280,15 +487,36 @@ io.on('connection', (socket) => {
       return;
     }
 
+    if (room.gameType === GAME_TYPES.CONTACT_BLOCK) {
+      if (connectedPlayers.length < CONTACT_BLOCK_MIN_PLAYERS || connectedPlayers.length > CONTACT_BLOCK_MAX_PLAYERS) {
+        return emitError(socket, `Need ${CONTACT_BLOCK_MIN_PLAYERS}-${CONTACT_BLOCK_MAX_PLAYERS} connected players to start.`);
+      }
+      if (!connectedPlayers.every(player => player.id === room.hostId || player.ready)) {
+        return emitError(socket, 'All non-host players must be ready.');
+      }
+
+      const activeHostId = payload.activeHostId || connectedPlayers[0]?.id;
+      if (!connectedPlayers.some(player => player.id === activeHostId)) {
+        return emitError(socket, 'Choose a valid active host.');
+      }
+
+      room.players = connectedPlayers;
+      startContactGame(roomCode, {
+        activeHostId,
+        timerMinutes: payload.timerMinutes,
+        requiredMatches: payload.requiredMatches
+      });
+      return;
+    }
+
     if (connectedPlayers.length !== PLAYERS_PER_ROOM) {
       return emitError(socket, `Need exactly ${PLAYERS_PER_ROOM} connected players to start.`);
     }
-    if (!connectedPlayers.every(p => p.id === room.hostId || p.ready)) {
+    if (!connectedPlayers.every(player => player.id === room.hostId || player.ready)) {
       return emitError(socket, 'All non-host players must be ready.');
     }
 
     room.players = connectedPlayers;
-
     startGame(room);
     io.to(roomCode).emit('game:started', { round: room.round });
     emitRoomState(roomCode);
@@ -336,75 +564,174 @@ io.on('connection', (socket) => {
     maybeRevealIfAllSubmitted(roomCode);
   });
 
-  // --- SELECT CARD ---
+  socket.on('contact:secretWord', ({ secretWord }) => {
+    const roomCode = playerRooms[socket.id];
+    const room = rooms[roomCode];
+    if (!room || room.gameType !== GAME_TYPES.CONTACT_BLOCK || room.gameState !== 'playing') return;
+    if (room.contactBlock.phase !== 'secret_entry') return emitError(socket, 'The secret word has already been set.');
+    if (room.contactBlock.activeHostId !== socket.id) return emitError(socket, 'Only the active host can set the secret word.');
+
+    const cleanWord = normalizeWord(secretWord, 48);
+    if (!cleanWord || cleanWord.length < 2) return emitError(socket, 'Enter a secret word with at least 2 letters.');
+
+    room.contactBlock.secretWord = cleanWord;
+    room.contactBlock.revealedLength = 1;
+    startContactCluePhase(roomCode);
+  });
+
+  socket.on('contact:clue', ({ clue }) => {
+    const roomCode = playerRooms[socket.id];
+    const room = rooms[roomCode];
+    if (!room || room.gameType !== GAME_TYPES.CONTACT_BLOCK || room.gameState !== 'playing') return;
+    if (room.contactBlock.phase !== 'clue_submission') return emitError(socket, 'Wait for the next clue window.');
+    if (socket.id === room.contactBlock.activeHostId) return emitError(socket, 'The active host cannot submit a clue.');
+
+    const cleanClue = normalizeWord(clue, 120);
+    if (!cleanClue) return emitError(socket, 'Enter a clue.');
+
+    room.contactBlock.currentClue = cleanClue;
+    room.contactBlock.clueAuthorId = socket.id;
+    room.contactBlock.clueSubmittedAt = Date.now();
+    room.contactBlock.phase = 'decision';
+    room.contactBlock.contactVotes = [];
+    room.contactBlock.forgetVotes = [];
+    room.contactBlock.answerParticipants = [];
+    room.contactBlock.answers = {};
+    emitRoomState(roomCode);
+  });
+
+  socket.on('contact:blockWord', ({ blockWord }) => {
+    const roomCode = playerRooms[socket.id];
+    const room = rooms[roomCode];
+    if (!room || room.gameType !== GAME_TYPES.CONTACT_BLOCK || room.gameState !== 'playing') return;
+    if (room.contactBlock.activeHostId !== socket.id) return emitError(socket, 'Only the active host can block words.');
+    if (!['decision', 'answer'].includes(room.contactBlock.phase)) return emitError(socket, 'Block words are only allowed during clue resolution.');
+
+    const cleanWord = normalizeWord(blockWord);
+    if (!cleanWord) return emitError(socket, 'Enter a word to block.');
+    if (room.contactBlock.blockedWords.includes(cleanWord)) return emitError(socket, 'That word is already blocked.');
+
+    room.contactBlock.blockedWords.push(cleanWord);
+    room.contactBlock.blockHistory.push({
+      word: cleanWord,
+      at: Date.now()
+    });
+    emitRoomState(roomCode);
+  });
+
+  socket.on('contact:vote', ({ choice }) => {
+    const roomCode = playerRooms[socket.id];
+    const room = rooms[roomCode];
+    if (!room || room.gameType !== GAME_TYPES.CONTACT_BLOCK || room.gameState !== 'playing') return;
+    if (room.contactBlock.phase !== 'decision') return emitError(socket, 'Voting is not open.');
+    if (socket.id === room.contactBlock.activeHostId) return emitError(socket, 'The active host does not vote.');
+
+    room.contactBlock.contactVotes = room.contactBlock.contactVotes.filter(id => id !== socket.id);
+    room.contactBlock.forgetVotes = room.contactBlock.forgetVotes.filter(id => id !== socket.id);
+
+    if (choice === 'contact') {
+      room.contactBlock.contactVotes.push(socket.id);
+    } else if (choice === 'forget') {
+      room.contactBlock.forgetVotes.push(socket.id);
+    } else {
+      return emitError(socket, 'Invalid vote choice.');
+    }
+
+    emitRoomState(roomCode);
+    maybeResolveContactDecision(roomCode);
+  });
+
+  socket.on('contact:answer', ({ answer }) => {
+    const roomCode = playerRooms[socket.id];
+    const room = rooms[roomCode];
+    if (!room || room.gameType !== GAME_TYPES.CONTACT_BLOCK || room.gameState !== 'playing') return;
+    if (room.contactBlock.phase !== 'answer') return emitError(socket, 'Answering is not open.');
+    if (!room.contactBlock.answerParticipants.includes(socket.id)) return emitError(socket, 'You are not part of this contact.');
+
+    const cleanAnswer = normalizeWord(answer);
+    const prefix = room.contactBlock.secretWord.slice(0, room.contactBlock.revealedLength).toLowerCase();
+    if (!cleanAnswer) return emitError(socket, 'Enter your answer.');
+    if (!cleanAnswer.toLowerCase().startsWith(prefix)) {
+      return emitError(socket, 'Answer must begin with the revealed prefix.');
+    }
+    if (room.contactBlock.usedWords.includes(cleanAnswer)) {
+      return emitError(socket, 'That word has already been used.');
+    }
+    if (room.contactBlock.blockedWords.includes(cleanAnswer)) {
+      return emitError(socket, 'That word has already been blocked.');
+    }
+
+    room.contactBlock.answers[socket.id] = cleanAnswer;
+    emitRoomState(roomCode);
+
+    if (room.contactBlock.answerParticipants.every(playerId => room.contactBlock.answers[playerId])) {
+      resolveContactAnswers(roomCode);
+    }
+  });
+
+  socket.on('contact:end', () => {
+    const roomCode = playerRooms[socket.id];
+    const room = rooms[roomCode];
+    if (!room || room.gameType !== GAME_TYPES.CONTACT_BLOCK) return;
+    if (room.hostId !== socket.id) return emitError(socket, 'Only the main host can end the game.');
+
+    resetRoomToLobby(room, roomCode);
+    io.to(roomCode).emit('game:restarted');
+    emitRoomState(roomCode);
+  });
+
   socket.on('card:select', ({ cardId }) => {
     const roomCode = playerRooms[socket.id];
     const room = rooms[roomCode];
     if (!room || room.gameState !== 'playing') return;
-    
-    // Check if it's this player's turn
+
     const currentPlayerId = room.playerOrder[room.currentPlayerIndex];
     if (socket.id !== currentPlayerId) {
-      return emitError(socket, 'It\'s not your turn!');
+      return emitError(socket, 'It is not your turn.');
     }
 
     const hand = room.hands[socket.id];
     if (!hand) return;
-    const cardIndex = hand.findIndex(c => c.id === cardId);
+    const cardIndex = hand.findIndex(card => card.id === cardId);
     if (cardIndex === -1) return emitError(socket, 'Invalid card selection.');
 
-    // Remove the card from current player
     const [selectedCard] = hand.splice(cardIndex, 1);
-    
-    // Move to next player in circle
     const nextPlayerIndex = (room.currentPlayerIndex + 1) % room.playerOrder.length;
     const nextPlayerId = room.playerOrder[nextPlayerIndex];
-    
-    // Give card to next player
     room.hands[nextPlayerId].push(selectedCard);
-    
-    // Check if next player won
+
     const result = checkWinner(room.hands);
     if (result) {
       room.gameState = 'finished';
-      const winner = room.players.find(p => p.id === result.winnerId);
+      const winner = room.players.find(player => player.id === result.winnerId);
       room.winner = {
         playerId: result.winnerId,
         playerName: winner ? winner.name : 'Unknown',
         color: result.color
       };
       const allHands = {};
-      room.players.forEach(p => { allHands[p.id] = room.hands[p.id] || []; });
+      room.players.forEach(player => {
+        allHands[player.id] = room.hands[player.id] || [];
+      });
       io.to(roomCode).emit('game:over', { winner: room.winner, allHands });
       emitRoomState(roomCode);
     } else {
-      // Move to next player's turn
       room.currentPlayerIndex = nextPlayerIndex;
       emitRoomState(roomCode);
     }
   });
 
-  // --- RESTART GAME ---
   socket.on('game:restart', () => {
     const roomCode = playerRooms[socket.id];
     const room = rooms[roomCode];
     if (!room) return;
     if (room.hostId !== socket.id) return emitError(socket, 'Only the host can restart.');
-    room.gameState = 'lobby';
-    room.hands = {};
-    room.playerOrder = [];
-    room.currentPlayerIndex = 0;
-    room.selectedCards = {};
-    room.winner = null;
-    room.deck = [];
-    clearWordTimers(roomCode);
-    room.wordMatch = createWordMatchState();
-    room.players.forEach(p => { p.ready = false; });
+
+    resetRoomToLobby(room, roomCode);
     emitRoomState(roomCode);
     io.to(roomCode).emit('game:restarted');
   });
 
-  // --- DISCONNECT ---
   socket.on('disconnect', () => {
     console.log(`[-] Disconnected: ${socket.id}`);
     const roomCode = playerRooms[socket.id];
@@ -412,64 +739,49 @@ io.on('connection', (socket) => {
     const room = rooms[roomCode];
     if (!room) return;
 
-    const playerIndex = room.players.findIndex(p => p.id === socket.id);
+    const playerIndex = room.players.findIndex(player => player.id === socket.id);
     if (playerIndex === -1) return;
 
     const disconnectedPlayer = room.players[playerIndex];
-    console.log(`Player ${disconnectedPlayer.name} left room ${roomCode}`);
-
-    // Remove player completely from room
     room.players.splice(playerIndex, 1);
 
-    // If player was in game, return card games to the lobby. Word Match can continue with 3+ players.
-    if (room.gameState === 'playing' && room.gameType !== GAME_TYPES.WORD_MATCH) {
-      room.gameState = 'lobby';
-      room.hands = {};
-      room.playerOrder = [];
-      room.currentPlayerIndex = 0;
-      room.selectedCards = {};
-      room.winner = null;
-      room.deck = [];
-      room.players.forEach(p => { p.ready = false; });
-      io.to(roomCode).emit('player:left', {
-        playerName: disconnectedPlayer.name,
-        message: `${disconnectedPlayer.name} left the game. Returning to lobby...`
-      });
-    } else if (room.gameState === 'playing' && room.gameType === GAME_TYPES.WORD_MATCH) {
-      room.playerOrder = room.playerOrder.filter(id => id !== socket.id);
-      delete room.wordMatch.submissions[socket.id];
-      delete room.wordMatch.scores[socket.id];
-      room.wordMatch.leaderboard = rankPlayers(room.players, room.wordMatch.scores);
+    if (room.gameState === 'playing') {
+      if (room.gameType === GAME_TYPES.WORD_MATCH) {
+        room.playerOrder = room.playerOrder.filter(id => id !== socket.id);
+        delete room.wordMatch.submissions[socket.id];
+        delete room.wordMatch.scores[socket.id];
+        room.wordMatch.leaderboard = rankPlayers(room.players, room.wordMatch.scores);
 
-      if (getConnectedPlayers(room).length < WORD_MATCH_MIN_PLAYERS) {
-        clearWordTimers(roomCode);
-        room.gameState = 'lobby';
-        room.wordMatch = createWordMatchState();
-        room.players.forEach(p => { p.ready = false; });
+        if (getConnectedPlayers(room).length < WORD_MATCH_MIN_PLAYERS) {
+          resetRoomToLobby(room, roomCode);
+          io.to(roomCode).emit('player:left', {
+            playerName: disconnectedPlayer.name,
+            message: `${disconnectedPlayer.name} left. Need at least ${WORD_MATCH_MIN_PLAYERS} players, returning to lobby...`
+          });
+        } else if (room.wordMatch.hostPlayerId === socket.id) {
+          beginWordRound(roomCode);
+        } else {
+          maybeRevealIfAllSubmitted(roomCode);
+        }
+      } else {
+        const minPlayers = room.gameType === GAME_TYPES.CONTACT_BLOCK ? CONTACT_BLOCK_MIN_PLAYERS : PLAYERS_PER_ROOM;
+        resetRoomToLobby(room, roomCode);
         io.to(roomCode).emit('player:left', {
           playerName: disconnectedPlayer.name,
-          message: `${disconnectedPlayer.name} left. Need at least ${WORD_MATCH_MIN_PLAYERS} players, returning to lobby...`
+          message: `${disconnectedPlayer.name} left the game. Need at least ${minPlayers} players, returning to lobby...`
         });
-      } else if (room.wordMatch.hostPlayerId === socket.id) {
-        beginWordRound(roomCode);
-      } else {
-        maybeRevealIfAllSubmitted(roomCode);
       }
     }
 
-    // If host left, reassign host from remaining players
     if (room.hostId === socket.id && room.players.length > 0) {
       room.hostId = room.players[0].id;
-      console.log(`Host reassigned to ${room.players[0].name}`);
     }
 
-    // If room is empty, delete it
     if (room.players.length === 0) {
       clearWordTimers(roomCode);
+      clearContactTimers(roomCode);
       delete rooms[roomCode];
-      console.log(`Room ${roomCode} deleted (no players left).`);
     } else {
-      // Update all remaining players
       emitRoomState(roomCode);
     }
 

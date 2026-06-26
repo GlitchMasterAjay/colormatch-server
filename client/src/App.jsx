@@ -4,6 +4,7 @@ import Lobby from './components/Lobby';
 import WaitingRoom from './components/WaitingRoom';
 import GameBoard from './components/GameBoard';
 import WordMatchBoard from './components/WordMatchBoard';
+import ContactBlockBoard from './components/ContactBlockBoard';
 
 const VIEW = {
   LOBBY: 'lobby',
@@ -150,6 +151,30 @@ export default function App() {
     window.location.reload();
   }, []);
 
+  const handleContactSecretWord = useCallback((secretWord) => {
+    emit('contact:secretWord', { secretWord });
+  }, [emit]);
+
+  const handleContactClue = useCallback((clue) => {
+    emit('contact:clue', { clue });
+  }, [emit]);
+
+  const handleContactVote = useCallback((choice) => {
+    emit('contact:vote', { choice });
+  }, [emit]);
+
+  const handleContactAnswer = useCallback((answer) => {
+    emit('contact:answer', { answer });
+  }, [emit]);
+
+  const handleContactBlockWord = useCallback((blockWord) => {
+    emit('contact:blockWord', { blockWord });
+  }, [emit]);
+
+  const handleContactEnd = useCallback(() => {
+    emit('contact:end');
+  }, [emit]);
+
  // REPLACE THIS OLD LINE:
 // const isHost = roomState?.players?.find(p => p.id === myId)?.id === roomState?.hostId || myId === roomState?.hostId;
 
@@ -182,6 +207,26 @@ const isHost = roomState && myId && String(roomState.hostId) === String(myId);
           isHost={isHost}
           onHostWord={handleHostWord}
           onSubmitWord={handleSubmitWord}
+          onRestart={handleRestart}
+          gameOver={gameOver}
+          disconnectMsg={disconnectMsg}
+        />
+      );
+    }
+
+    if (roomState?.gameType === 'contact-block') {
+      return (
+        <ContactBlockBoard
+          roomState={roomState}
+          playerState={playerState}
+          myId={myId}
+          isHost={isHost}
+          onSecretWord={handleContactSecretWord}
+          onClue={handleContactClue}
+          onVote={handleContactVote}
+          onAnswer={handleContactAnswer}
+          onBlockWord={handleContactBlockWord}
+          onEndGame={handleContactEnd}
           onRestart={handleRestart}
           gameOver={gameOver}
           disconnectMsg={disconnectMsg}
