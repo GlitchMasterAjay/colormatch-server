@@ -36,6 +36,7 @@ const rooms = {};
 const playerRooms = {};
 const wordTimers = {};
 const contactTimers = {};
+const MAX_CHAT_MESSAGES = 80;
 
 function emitRoomState(roomCode) {
   const room = rooms[roomCode];
@@ -67,6 +68,10 @@ function sanitizeTimerMinutes(value) {
   const minutes = Number(value);
   if (![2, 5, 10, 15].includes(minutes)) return 5;
   return minutes;
+}
+
+function sanitizeChatMessage(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').slice(0, 240);
 }
 
 function getConnectedPlayers(room) {
@@ -456,6 +461,32 @@ io.on('connection', socket => {
     const player = room.players.find(entry => entry.id === socket.id);
     if (!player) return;
     player.ready = !!ready;
+    emitRoomState(roomCode);
+  });
+
+  socket.on('chat:send', ({ message }) => {
+    const roomCode = playerRooms[socket.id];
+    const room = rooms[roomCode];
+    if (!room) return;
+
+    const player = room.players.find(entry => entry.id === socket.id);
+    if (!player) return;
+
+    const cleanMessage = sanitizeChatMessage(message);
+    if (!cleanMessage) return emitError(socket, 'Enter a message.');
+
+    room.chatMessages.push({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      playerId: player.id,
+      playerName: player.name,
+      message: cleanMessage,
+      sentAt: Date.now()
+    });
+
+    if (room.chatMessages.length > MAX_CHAT_MESSAGES) {
+      room.chatMessages = room.chatMessages.slice(-MAX_CHAT_MESSAGES);
+    }
+
     emitRoomState(roomCode);
   });
 

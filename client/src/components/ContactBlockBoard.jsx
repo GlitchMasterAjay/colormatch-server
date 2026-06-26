@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import Confetti from './Confetti';
+import ChatPanel from './ChatPanel';
 
 function useCountdown(targetTime) {
   const [now, setNow] = useState(Date.now());
@@ -27,7 +28,8 @@ export default function ContactBlockBoard({
   onEndGame,
   onRestart,
   gameOver,
-  disconnectMsg
+  disconnectMsg,
+  onSendChat
 }) {
   const [secretWord, setSecretWord] = useState('');
   const [clue, setClue] = useState('');
@@ -387,6 +389,12 @@ export default function ContactBlockBoard({
               ))}
             </div>
           </div>
+          <ChatPanel
+            messages={roomState?.chatMessages || []}
+            myId={myId}
+            onSend={onSendChat}
+            compact
+          />
         </aside>
       </div>
     </div>

@@ -93,6 +93,7 @@ function createRoom(hostId, hostName, gameType = GAME_TYPES.CARD_MATCH) {
     gameType,
     hostId,
     players: [{ id: hostId, name: hostName, ready: false, connected: true }],
+    chatMessages: [],
     gameState: 'lobby', // lobby | playing | finished
     hands: {},
     playerOrder: [],
@@ -235,6 +236,7 @@ function getPublicRoomState(room) {
     round: room.round,
     winner: room.winner,
     submittedPlayers: Object.keys(room.selectedCards),
+    chatMessages: room.chatMessages || [],
     wordMatch,
     contactBlock,
     gameConfig: {

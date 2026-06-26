@@ -175,6 +175,10 @@ export default function App() {
     emit('contact:end');
   }, [emit]);
 
+  const handleSendChat = useCallback((message) => {
+    emit('chat:send', { message });
+  }, [emit]);
+
  // REPLACE THIS OLD LINE:
 // const isHost = roomState?.players?.find(p => p.id === myId)?.id === roomState?.hostId || myId === roomState?.hostId;
 
@@ -193,6 +197,7 @@ const isHost = roomState && myId && String(roomState.hostId) === String(myId);
         isHost={isHost}
         onReady={handleReady}
         onStart={handleStart}
+        onSendChat={handleSendChat}
         onLeave={handleLeave}
       />
     );
@@ -210,6 +215,7 @@ const isHost = roomState && myId && String(roomState.hostId) === String(myId);
           onRestart={handleRestart}
           gameOver={gameOver}
           disconnectMsg={disconnectMsg}
+          onSendChat={handleSendChat}
         />
       );
     }
@@ -230,6 +236,7 @@ const isHost = roomState && myId && String(roomState.hostId) === String(myId);
           onRestart={handleRestart}
           gameOver={gameOver}
           disconnectMsg={disconnectMsg}
+          onSendChat={handleSendChat}
         />
       );
     }
@@ -244,6 +251,7 @@ const isHost = roomState && myId && String(roomState.hostId) === String(myId);
         onRestart={handleRestart}
         gameOver={gameOver}
         disconnectMsg={disconnectMsg}
+        onSendChat={handleSendChat}
       />
     );
   }

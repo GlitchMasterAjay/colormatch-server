@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Confetti from './Confetti';
+import ChatPanel from './ChatPanel';
 
 function useCountdown(targetTime) {
   const [now, setNow] = useState(Date.now());
@@ -69,7 +70,8 @@ export default function WordMatchBoard({
   onSubmitWord,
   onRestart,
   gameOver,
-  disconnectMsg
+  disconnectMsg,
+  onSendChat
 }) {
   const [startingWord, setStartingWord] = useState('');
   const [answer, setAnswer] = useState('');
@@ -274,6 +276,12 @@ export default function WordMatchBoard({
               ))}
             </div>
           </div>
+          <ChatPanel
+            messages={roomState?.chatMessages || []}
+            myId={myId}
+            onSend={onSendChat}
+            compact
+          />
         </aside>
       </div>
     </div>

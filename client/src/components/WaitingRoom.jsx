@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
+import ChatPanel from './ChatPanel';
 
-export default function WaitingRoom({ roomState, myId, isHost, onReady, onStart, onLeave }) {
+export default function WaitingRoom({ roomState, myId, isHost, onReady, onStart, onSendChat, onLeave }) {
   const [copied, setCopied] = useState(false);
   const [rounds, setRounds] = useState(10);
   const [activeHostId, setActiveHostId] = useState('');
@@ -68,7 +69,7 @@ export default function WaitingRoom({ roomState, myId, isHost, onReady, onStart,
           </button>
         </div>
 
-        <div className="grid lg:grid-cols-[1fr_240px] gap-4 mb-4">
+        <div className="grid xl:grid-cols-[1fr_240px_320px] gap-4 mb-4">
           <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-5">
             <div className="flex justify-between items-center mb-4">
               <h2 className="font-semibold text-white">Players</h2>
@@ -187,6 +188,13 @@ export default function WaitingRoom({ roomState, myId, isHost, onReady, onStart,
               Ready: <span className="text-white font-semibold">{readyPlayers.length}/{players.length}</span>
             </div>
           </div>
+
+          <ChatPanel
+            messages={roomState?.chatMessages || []}
+            myId={myId}
+            onSend={onSendChat}
+            title="Lobby Chat"
+          />
         </div>
 
         <div className="space-y-3">
